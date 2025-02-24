@@ -1,0 +1,155 @@
+{% macro simple(params) %}
+    {% if params.text is not none %}
+        <style>
+            #prompt-text {
+                text-align: {{ params.text_align }};
+            }
+        </style>
+
+        <div id="prompt-text">
+            {{ params.text_html }}
+        </div>
+    {% endif %}
+{% endmacro %}
+
+
+{% macro audio_and_image(params) %}
+    <!-- Code of the image prompt -->
+    <style>
+        #prompt-image, #prompt-image-out {
+            width: {{ params.width }};
+            height: {{ params.height }};
+            display: block;
+            margin-left: auto;
+            margin-right: auto;
+            margin-top: {{ params.margin_top}};
+            margin-bottom: {{ params.margin_bottom}};
+            opacity: 1;
+        }
+        #prompt-image-out {
+            display: none;
+        }
+    </style>
+
+    <img 
+        id="prompt-image" 
+        src="{{ params.image_url }}" 
+        alt="{{ gettext("Image not found")  | replace('"',"'") | safe  }}"
+    >
+    <img 
+        id="prompt-image-out" 
+        src="{{ params.image_url_2 }}" 
+        alt="{{ safe }}"
+    >
+
+    <script>
+        let promptImage = $("#prompt-image").get(0);
+        let promptImageOut = $("#prompt-image-out").get(0);
+
+        psynet.trial.onEvent("trialConstruct", () => {
+            if (!promptImage.complete) {
+                psynet.waitForEventListener(promptImage, "load");
+            }
+        });
+        psynet.trial.onEvent("promptStart", () => { 
+            promptImage.style.opacity = 1; 
+        });
+        psynet.trial.onEvent("recordStart", () => {
+            if (!{{ params.has_post_prompt_image | tojson }}) return;
+            promptImage.style.display = 'none'; 
+            promptImageOut.style.display = 'block'; 
+        });
+        psynet.trial.onEvent("promptEnd", () => {
+            if (!{{ params.has_post_prompt_image | tojson }}) return;
+            promptImage.style.display = 'none'; 
+            promptImageOut.style.display = 'block'; 
+        });
+    </script>
+
+    <!-- Code of the audio prompt -->
+    {{ simple(params) }}
+
+    <script>
+        var audioPromptPlayerOptions = {{ params.js_play_options | tojson }};
+
+        let loopAudio = {{ params.loop | tojson }};
+
+        psynet.trial.onEvent("trialFinished", function() {
+            if (loopAudio) {
+                psynet.trial.restart();
+            }
+        });
+    </script>
+
+    {% if params.controls %}
+        <style>
+            #audio-prompt-controls {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                padding-top: 25px;
+            }
+            .audio-prompt-button {
+                margin-left: 10px;
+                margin-right: 10px;
+            }
+            #audio-prompt-loop {
+                margin-left: 10px;
+                margin-right: 10px;
+            }
+        </style>
+
+        <div id="audio-prompt-controls" style="display: none">
+            <button id="audio-prompt-play" type="button" class="btn audio-prompt-button btn-primary btn-sm" disabled>
+                {{ gettext("Play from start") }}
+            </button>
+            <button id="audio-prompt-stop" type="button" class="btn audio-prompt-button btn-secondary btn-sm" disabled>
+                {{ gettext("Stop") }}
+            </button>
+            <div id="audio-prompt-loop">
+              <input id="audio-prompt-loop-input" type="checkbox" value="" {% if params.loop %} checked {% endif %}>
+              <label id="audio-prompt-loop-label" for="audio-prompt-loop-input" style="cursor: pointer;">
+                {{ gettext("Loop") }}
+              </label>
+            </div>
+        </div>
+
+        <script>
+        $(document).ready(function() {
+            $("#audio-prompt-play").on("click", function() {
+                psynet.trial.restart();
+            });
+            $("#audio-prompt-stop").on("click", function() {
+                psynet.trial.stop();
+            });
+            $("#audio-prompt-loop-input").on("change", function(event) {
+                loopAudio = event.target.checked;
+            });
+        });
+
+        psynet.trial.onEvent("trialConstruct", function() {
+            $(".audio-prompt-button").prop("disabled", false)
+        });
+        </script>
+    {% endif %}
+
+    <script>
+        psynet.page.prompt.play = function(providedOptions) {
+            let options = psynet.utils.deepCopy(audioPromptPlayerOptions);
+            Object.assign(options, providedOptions);
+
+            let sound = psynet.audio.prompt.play(options);
+            sound.source.addEventListener("ended", function() {
+                if (!sound.manuallyStopped) {
+                    psynet.trial.registerEvent("promptEnd");
+                }
+            });
+        };
+
+        psynet.page.prompt.stop = psynet.media.stopAllAudio;
+
+        psynet.trial.onEvent("promptStart", psynet.page.prompt.play);
+        psynet.trial.onEvent("trialPrepare", psynet.media.stopAllAudio);
+        psynet.trial.onEvent("trialStop", psynet.page.prompt.stop);
+    </script>
+{% endmacro %}

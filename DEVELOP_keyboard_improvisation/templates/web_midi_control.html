@@ -1,0 +1,239 @@
+{% macro web_midi(params) %}
+
+    <script src="static/scripts/soundfont-player/soundfont-player.min.js"></script>
+
+    <script>
+
+
+        // Test
+        // psynet.response.staged.ptich = [61, 62, 63, 64, 65, 66];
+        // psynet.response.staged.raw_data.duration = [100, 100, 100, 100, 100, 100];
+        // psynet.response.staged.raw_data.time = [0, 200, 400, 800, 1600, 3200];
+        // psynet.response.staged.raw_data.velocity = [50, 200, 120, 55, 120, 130];
+
+        // Parameters
+        const isSoundEnabled = {{ params.is_sound_enabled | tojson }};
+
+        // Key press tracking variables 
+        const data = [];
+        const playingNotes = {};
+        const pressedKeys = []
+        const lastOnsetTimePerNote = {};
+        
+        // Internal midi and sound managing variables
+        let piano = null;
+        let midiAccess = null;
+        const midiInputs = [];
+        
+        // Invariable constants
+        const MAX_VELOCITY = 127;
+        const MIN_INTER_ONSET_INTERVAL = 25;
+        const MIDI_MESSAGE_CODE_NOTE_ON = 144;
+
+        // Functions
+        const addPressedKey = function(key) {
+            const selectedIndex = pressedKeys.indexOf(key);
+            if (selectedIndex === -1) pressedKeys.push(key);
+        }
+
+        const removePressedKey = function(key) {
+		    const selectedIndex = pressedKeys.indexOf(key);
+		    if (selectedIndex !== -1) pressedKeys.splice(selectedIndex, 1);
+	    }
+
+        const removeAllPressedKeyboardKeys = function(state) {
+		    pressedKeys.splice(0, pressedKeys.length);
+	    }
+
+        const isOnsetValid = function(midiMessage) {
+            const currentTime = Date.now();
+            const lastTime = lastOnsetTimePerNote[midiMessage.note];
+            if (!lastTime || currentTime - lastTime > MIN_INTER_ONSET_INTERVAL) {
+                lastOnsetTimePerNote[midiMessage.note] = currentTime;
+                return true;
+            } else return false;
+        }
+
+        const playNote = function(note) {
+            console.log(note);
+            playingNotes[note] = piano.play(note, 0, {
+                gain: (velocity) => {
+                    return velocity / MAX_VELOCITY;
+                },
+            });
+        }
+
+        const stopAllNotes = function() {
+            for (const note in playingNotes) {
+                playingNotes[note].stop();
+                delete playingNotes[note];
+            }
+        }
+
+        const stopNote = function(note) {
+            playingNotes[note].stop();
+            delete playingNotes[note];
+        }
+
+        const recordKeyPress = function(midiMessage) {
+            addPressedKey(midiMessage.note);
+            storeKeyPressData({
+                note: midiMessage.note,
+                time: new Date().getTime(),
+                velocity: midiMessage.velocity,
+                duration: null,
+            });
+        }
+
+        const recordKeyReleased = function(midiMessage) {
+            removePressedKey(midiMessage.note);
+            storeKeyReleaseData({
+                note: midiMessage.note,
+                time: new Date().getTime(),
+            });
+        }
+
+        const storeKeyPressData = function(keyPressData) {
+            data.push(keyPressData);
+        }
+        
+        const storeKeyReleaseData = function(keyReleaseData) {
+            // We add the duration of the key press to the datapoint
+            const dataPoint = data.findLast((element, index) => 
+                element.note === keyReleaseData.note
+            )
+            if (dataPoint) 
+                dataPoint.duration = keyReleaseData.time - dataPoint.time;
+        }
+
+        /**
+         * Handle the midi messages
+         * @param {Object} midiNote
+         * @param {String} midiNote.data[0] 			144 for "Note On" or 128 for "Note Off"
+         * @param {Number} midiNote.data[1] 			Value between 0-127
+         * @param {Number} midiNote.data[2] 			Value between 0-127
+         */
+        const manageMidiNote = function(midiNote) {
+            const midiMessage = {
+                type: midiNote.data[0] === MIDI_MESSAGE_CODE_NOTE_ON ? 'Note On' : 'Note Off',
+                note: midiNote.data[1],
+                velocity: midiNote.data[2],
+            };
+
+            // Verification to prevent buggy multiple input handling
+            if (!isOnsetValid(midiMessage)) return;
+
+            // Additional support for MIDI protocoles using a velocity === 0 as a key release signal
+            if (midiMessage.velocity === 0) midiMessage.type = 'Note Off';
+
+            switch (midiMessage.type) {
+                case 'Note On':
+                    if (isSoundEnabled) playNote(midiMessage.note);
+                    recordKeyPress(midiMessage);
+                    break;
+
+                case 'Note Off':
+                    stopNote(midiMessage.note);
+                    recordKeyReleased(midiMessage);
+                    break;
+
+                default:
+                    break;
+            }
+        }
+        
+        const initPiano = function(next = () => {}) {
+            console.log("Start initialization");
+            psynet.log.debug("Piano initialization starting");
+            Soundfont.instrument(new AudioContext(), 'acoustic_grand_piano').then((instrument) => {
+                piano = instrument;
+
+                // Initialize the handlng of MIDI input events
+                window.navigator.requestMIDIAccess().then((midiAccess) => {
+                    midiAccess = midiAccess.inputs.forEach((midiInput) => {
+                        midiInput.onmidimessage = manageMidiNote;
+                        midiInputs.push(midiInput);
+                    });
+                    psynet.log.debug("Initialized WebMIDI.");
+                    console.log("Initialization complete");
+                    next();
+                });
+            });
+        }
+
+        const terminatePiano = function() {
+            removeAllPressedKeyboardKeys();
+            stopAllNotes();
+            piano = null;
+            while (midiInputs.length > 0) 
+                midiInputs.pop().onmidimessage = null;
+            midiAccess = null;
+            psynet.log.debug("Piano terminated");
+        }
+
+        const testCompatibility = function() {
+            // Verifying MIDI support
+            if (navigator.requestMIDIAccess) {
+                psynet.log.debug('The browser supports WebMIDI.');
+            } 
+            else {
+                psynet.log.debug('WebMIDI is not supported in the browser.');
+                alert('WebMIDI is not supported in this browser.');;
+            }
+        };
+
+        /*
+        // Events handling
+        psynet.trial.onEvent("trialConstruct", () => new Promise((resolve) => {
+            testCompatibility();
+            navigator.requestMIDIAccess().then((access) => {
+                initPiano(resolve)
+            }).catch((error) => {
+                throw new Error('WebMIDI initilization failed.', error.name + ":", error.message);
+            });
+        }));
+        */
+        $(document).ready(function() {
+            new Promise((resolve) => {
+                testCompatibility();
+                navigator.requestMIDIAccess().then((access) => {
+                    initPiano(resolve)
+                }).catch((error) => {
+                    throw new Error('WebMIDI initilization failed.', error.name + ":", error.message);
+                });
+        })
+
+        // Button bindings
+        $(document).ready(function() {
+            $("#btn-reinitialize-midi-connection").on("click", function() {
+                terminatePiano();
+                initPiano();
+            });
+        });
+
+    </script>
+
+
+    {% if params.has_reinitialize_connection_button %}
+    <style>
+        #midi-keyboard-settings {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding-bottom: 50px;
+        }
+        .midi-keyboard-button {
+            margin: 0 10px 10px;
+        }
+    </style>
+
+    <div id="midi-keyoard-settings">
+        <button id="btn-reinitialize-midi-connection" type="button" class="btn midi-keyboard-button auto-reset 
+            record-control btn-danger btn-sm">
+            {{ gettext("Reinitialize MIDI keyboard connection") }}
+        </button>
+    </div>
+    {% endif %}
+
+{% endmacro %}
+
