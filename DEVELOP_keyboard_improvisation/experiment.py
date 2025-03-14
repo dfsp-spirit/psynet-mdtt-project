@@ -22,7 +22,7 @@ from .python_scripts.audio_and_image_prompt import AudioAndImagePrompt
 ########################################################################################################################
 
 INPUT_PATH_DIR = "static/melodies/"
-NUMBER_REPETITIONS = 30
+NUMBER_REPETITIONS = 3
 
 file_names = [
     "Melody_3.wav",
@@ -102,7 +102,7 @@ def verify_midi_keyboard():
         "verify_midi_keyboard",
         ImagePrompt(
             url="static/plug-usb.gif",
-            text= 
+            text=
                 "Make sure your MIDI keyboard is connected to your computer and then press any key on the " \
                 "MIDI keyboard. If you do not hear any sound when pressing the keys of your MIDI keyboard, " \
                 "press the \"Reinitialize MIDI keyboard connection button\". The \"Next\" button will be "
@@ -198,13 +198,13 @@ class MusicalImprovisationTrial(StaticTrial):
                 ),
             }
         )
-    
+
     def improvise_melody(self, number_repetition):
         melody_duration = get_duration_wave_file(os.path.join(INPUT_PATH_DIR, self.definition["melody_file_name"]))
         def get_improvisation_events():
             return {
                 "recordStart": Event(
-                    is_triggered_by="promptStart", 
+                    is_triggered_by="promptStart",
                     delay=melody_duration - 0.25,
                     js="document.getElementById('prompt-text').innerHTML = 'Improvise now!'; ",
                 ),
@@ -247,7 +247,7 @@ class MusicalImprovisationTrial(StaticTrial):
         is_last_melody =  self.definition['melody_index'] < (total_melodies - 1)
         if is_last_melody:
             sequence.append(self.show_info_page_before_next_melody())
-    
+
         return sequence
 
 # ======================================================================================================================
