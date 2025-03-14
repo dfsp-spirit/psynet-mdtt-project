@@ -38,6 +38,8 @@ base_payment = 0.34
 # For local debug CAP-Recruiter set:
 # debug_recruiter = dev-cap-recruiter
 
-[Dashboard]
-dashboard_user = admin
-dashboard_password = 12345
+## The following lines are not allowed in config.txt and were moved to ~/.dallingerconfig
+#[Dashboard]
+#dashboard1_user = 
+#dashboard1_password = 
+host = 10.0.2.15
